@@ -1,0 +1,25 @@
+[project]
+name = "estate-intelligence"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.black]
+target-version = ['py312']
+
+[tool.pyright]
+pythonVersion = "3.12"
+venvPath = "services/collector"
+venv = ".venv"
+extraPaths = [
+    "services/collector",
+    "services/collector/vendor/parser_avito",
+]
+ignore = [
+    "services/collector/vendor/parser_avito",
+]
+exclude = [
+    "services/collector/vendor/parser_avito/.venv",
+    "services/collector/vendor/parser_avito/result",
+    "**/.venv",
+]

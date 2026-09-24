@@ -1,0 +1,2 @@
+2026-09-24 22:07:25.702 | ERROR    | AvitoParser:set_up:40 - Ошибка при загрузке конфига: [Errno 2] No such file or directory: 'config.toml'
+2026-09-24 22:07:25.702 | ERROR    | AvitoParser:set_up:40 - Ошибка при загрузке конфига: [Errno 2] No such file or directory: 'config.toml'
