@@ -3,36 +3,39 @@
     "python.terminal.activateEnvironment": true,
     "python.analysis.typeCheckingMode": "basic",
     "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.venvPath": "${workspaceFolder}/services/collector",
+    "python.analysis.venv": ".venv",
     "python.analysis.extraPaths": [
         "${workspaceFolder}/services/collector",
         "${workspaceFolder}/services/collector/vendor/parser_avito"
     ],
     "python.analysis.ignore": [
+        "**/.venv/**",
         "**/services/collector/vendor/parser_avito/**"
     ],
     "python.analysis.exclude": [
-        "**/services/collector/vendor/parser_avito/.venv/**",
-        "**/services/collector/vendor/parser_avito/result/**",
-        "**/.venv/**"
+        "**/.venv/**",
+        "**/services/collector/vendor/parser_avito/result/**"
     ],
     "files.watcherExclude": {
-        "**/services/collector/.venv/**": true,
-        "**/services/collector/vendor/parser_avito/.venv/**": true,
+        "**/.venv/**": true,
         "**/services/collector/vendor/parser_avito/result/**": true
     },
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "cursorpyright.analysis.diagnosticMode": "workspace",
+    "cursorpyright.analysis.venvPath": "${workspaceFolder}/services/collector",
+    "cursorpyright.analysis.venv": ".venv",
     "cursorpyright.analysis.extraPaths": [
         "${workspaceFolder}/services/collector",
         "${workspaceFolder}/services/collector/vendor/parser_avito"
     ],
     "cursorpyright.analysis.ignore": [
+        "**/.venv/**",
         "**/services/collector/vendor/parser_avito/**"
     ],
     "cursorpyright.analysis.exclude": [
-        "**/services/collector/vendor/parser_avito/.venv/**",
-        "**/services/collector/vendor/parser_avito/result/**",
-        "**/.venv/**"
+        "**/.venv/**",
+        "**/services/collector/vendor/parser_avito/result/**"
     ],
     "cursorpyright.analysis.typeCheckingMode": "basic"
 }

@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from .models import Apartment
+from domain import Apartment
 
 _METRO_M_RE = re.compile(r"(\d+)\s*м", re.IGNORECASE)
 

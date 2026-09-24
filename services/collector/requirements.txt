@@ -1,0 +1,6 @@
+-r vendor/parser_avito/requirements.txt
+psycopg[binary]>=3.2
+clickhouse-connect>=0.8
+python-dotenv>=1.0
+loguru>=0.7
+pydantic>=2.0

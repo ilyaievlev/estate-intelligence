@@ -1,0 +1,51 @@
+# Запуск из корня репо (переменные берутся из корневого .env):
+#   docker-compose --env-file .env -f infra/docker/docker-compose.yml up -d
+name: estate-intelligence
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: estate-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-estate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-estate}
+      POSTGRES_DB: ${POSTGRES_DB:-estate}
+    ports:
+      - "5432:5432"
+    volumes:
+      - estate_pgdata:/var/lib/postgresql/data
+      - ../../services/collector/sql/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-estate} -d ${POSTGRES_DB:-estate}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: estate-clickhouse
+    environment:
+      # БД фиксирована: на неё ссылается sql/clickhouse/*.sql
+      CLICKHOUSE_DB: estate
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-estate}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-estate}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - estate_chdata:/var/lib/clickhouse
+      - ../../services/collector/sql/clickhouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  estate_pgdata:
+  estate_chdata:

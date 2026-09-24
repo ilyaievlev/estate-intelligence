@@ -1,1 +1,1 @@
-# Requirements are managed in pyproject.toml for Python 3.12.
+# Зависимости живут по сервисам: services/<service>/requirements.txt

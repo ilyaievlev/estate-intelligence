@@ -16,10 +16,10 @@ extraPaths = [
     "services/collector/vendor/parser_avito",
 ]
 ignore = [
+    "**/.venv",
     "services/collector/vendor/parser_avito",
 ]
 exclude = [
-    "services/collector/vendor/parser_avito/.venv",
-    "services/collector/vendor/parser_avito/result",
     "**/.venv",
+    "services/collector/vendor/parser_avito/result",
 ]
