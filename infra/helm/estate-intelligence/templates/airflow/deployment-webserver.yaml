@@ -61,6 +61,8 @@ spec:
               mountPath: /opt/airflow/dags
             - name: estate
               mountPath: /opt/estate
+            - name: logs
+              mountPath: /opt/airflow/logs
           readinessProbe:
             httpGet:
               path: /health
@@ -80,6 +82,9 @@ spec:
         - name: estate
           hostPath:
             path: {{ .Values.global.projectHostPath }}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: airflow-logs
 ---
 apiVersion: v1
 kind: Service

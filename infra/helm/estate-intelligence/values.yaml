@@ -76,6 +76,8 @@ inference:
     tag: "latest"
     pullPolicy: IfNotPresent
   replicaCount: 1
+  # Каждая реплика сама сверяет @champion и перезагружает модель (0 — выключить)
+  modelPollIntervalSec: 60
   service:
     type: LoadBalancer
     port: 8000
@@ -106,6 +108,11 @@ airflow:
   service:
     type: LoadBalancer
     port: 8080
+  # Общий для webserver и воркеров, иначе webserver не читает логи живых задач
+  secretKey: estate-local-airflow-secret
+  logs:
+    persistence:
+      size: 2Gi
   worker:
     image: estate-airflow:latest
     pullPolicy: IfNotPresent

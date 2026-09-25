@@ -74,11 +74,9 @@ def generate_apartment(rooms: int | None = None) -> dict[str, object]:
         "metro": st["metro"],
         "metro_line": st["line"],
         "metro_distance_m": round(random.uniform(150.0, 1600.0), 1),
-        "transport_type": random.choice(["walk", "transport"]),
         "latitude": st["lat"] + random.uniform(-0.005, 0.005),
         "longitude": st["lon"] + random.uniform(-0.005, 0.005),
         "distance_to_center_m": st["dist"] + random.uniform(-300.0, 300.0),
-        "seller_type": random.choice(["owner", "realtor", "agency"]),
     }
 
 

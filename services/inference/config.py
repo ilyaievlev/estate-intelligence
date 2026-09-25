@@ -22,9 +22,18 @@ warnings.filterwarnings("ignore", message=".*protected namespace.*")
 warnings.filterwarnings("ignore", message=".*StarletteDeprecationWarning.*")
 warnings.filterwarnings("ignore", message=".*deprecated.*")
 
-# Координаты географического центра Москвы (Кремль / Красная площадь)
-MOSCOW_CENTER_LAT: float = float(os.getenv("MOSCOW_CENTER_LAT", "55.751244"))
-MOSCOW_CENTER_LON: float = float(os.getenv("MOSCOW_CENTER_LON", "37.618423"))
+# Координаты центра Москвы (Красная площадь) — те же, что при обучении (services/ml/config.py)
+MOSCOW_CENTER_LAT: float = float(os.getenv("MOSCOW_CENTER_LAT", "55.753930"))
+MOSCOW_CENTER_LON: float = float(os.getenv("MOSCOW_CENTER_LON", "37.620795"))
+
+# Справочник станций для поиска ближайшего метро по координатам
+DATABASE_URL: str = os.getenv(
+    "DATABASE_URL",
+    "postgresql://estate:estate@localhost:5433/estate",
+)
+
+# Как часто каждый под сверяет версию @champion в реестре и подтягивает новую модель
+MODEL_POLL_INTERVAL_SEC: int = int(os.getenv("MODEL_POLL_INTERVAL_SEC", "60"))
 
 # Параметры HTTP-сервера инференса
 INFERENCE_HOST: str = os.getenv("INFERENCE_HOST", "0.0.0.0")

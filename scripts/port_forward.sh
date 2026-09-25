@@ -1,34 +1,50 @@
 #!/usr/bin/env bash
-set -e
+set -u
 
 NAMESPACE="${NAMESPACE:-estate}"
 
 echo "=================================================================="
-echo " 🌐 Estate Intelligence - Kubernetes Port Forwarding"
-echo " Namespace: ${NAMESPACE}"
+echo " Estate Intelligence — port-forward (namespace: ${NAMESPACE})"
 echo "=================================================================="
-echo " - FastAPI ML Inference: http://localhost:8000 (docs: /docs, health: /health)"
-echo " - Grafana Dashboards:   http://localhost:3000 (admin / admin)"
-echo " - Apache Airflow UI:    http://localhost:8080 (admin / admin)"
-echo " - MLflow Tracking UI:   http://localhost:5001"
-echo " - Prometheus Server:    http://localhost:9090"
-echo " - ClickHouse HTTP API:  http://localhost:8123 (estate / estate)"
-echo " - MinIO Object Console: http://localhost:9011 (minioadmin / minioadmin)"
-echo " - PostgreSQL (PostGIS): localhost:5433 (estate / estate / estate)"
+echo " Inference API:  http://localhost:8000/docs"
+echo " Grafana:        http://localhost:3000   (admin / admin)"
+echo " Airflow:        http://localhost:8080   (admin / admin)"
+echo " MLflow:         http://localhost:5001"
+echo " Prometheus:     http://localhost:9090"
+echo " ClickHouse:     http://localhost:8123   (estate / estate)"
+echo " MinIO Console:  http://localhost:9011   (minioadmin / minioadmin)"
+echo " Postgres:       localhost:5433          (estate / estate)"
 echo "=================================================================="
-echo "Press Ctrl+C to terminate all port forward tunnels."
+echo "Ctrl+C — закрыть все туннели"
 echo ""
 
-# Terminate all child processes on exit
-trap 'kill $(jobs -p) 2>/dev/null || true' EXIT SIGINT SIGTERM
+cleanup() {
+  trap - INT TERM EXIT
+  for pid in $(jobs -p); do
+    pkill -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+  done
+  exit 0
+}
+trap cleanup INT TERM EXIT
 
-kubectl port-forward svc/inference 8000:8000 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/grafana 3000:3000 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/airflow 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/mlflow-external 5001:5001 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/prometheus 9090:9090 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/clickhouse-external 8123:8123 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/minio-external 9011:9011 -n "${NAMESPACE}" >/dev/null 2>&1 &
-kubectl port-forward svc/postgres-external 5433:5433 -n "${NAMESPACE}" >/dev/null 2>&1 &
+# port-forward обрывается при рестарте пода, поэтому переподключаемся в цикле.
+forward() {
+  local target="$1" ports="$2"
+  while true; do
+    kubectl port-forward "$target" "$ports" -n "$NAMESPACE" >/dev/null 2>&1
+    sleep 2
+  done
+}
+
+forward svc/inference           8000:8000 &
+forward svc/grafana             3000:3000 &
+forward svc/airflow             8080:8080 &
+forward svc/mlflow-external     5001:5001 &
+forward svc/prometheus          9090:9090 &
+forward svc/clickhouse-external 8123:8123 &
+forward svc/minio-external      9011:9011 &
+forward svc/minio-external      9010:9010 &
+forward svc/postgres-external   5433:5433 &
 
 wait

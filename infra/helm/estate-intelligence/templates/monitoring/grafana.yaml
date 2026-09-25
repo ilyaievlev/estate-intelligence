@@ -21,6 +21,9 @@ metadata:
     {{- include "estate-intelligence.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # SQLite Grafana на RWO-диске: два пода одновременно его не делят.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: grafana
