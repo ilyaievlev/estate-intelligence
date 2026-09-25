@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Добавление путей сервисов в системный путь sys.path
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,6 +22,14 @@ if str(ML_DIR) not in sys.path:
     sys.path.insert(0, str(ML_DIR))
 
 try:
+    from services.inference.metrics import (
+        ACTIVE_MODEL_VERSION,
+        BATCH_SIZE,
+        INFERENCE_LATENCY_SECONDS,
+        MODEL_RELOAD_TOTAL,
+        PREDICTED_RENT_RUB,
+        PREDICTIONS_TOTAL,
+    )
     from services.inference.schemas import (
         ApartmentPredictRequest,
         BatchPredictionResult,
@@ -31,6 +40,14 @@ try:
     )
     from services.inference.service import inference_service
 except ImportError:
+    from metrics import (  # type: ignore
+        ACTIVE_MODEL_VERSION,
+        BATCH_SIZE,
+        INFERENCE_LATENCY_SECONDS,
+        MODEL_RELOAD_TOTAL,
+        PREDICTED_RENT_RUB,
+        PREDICTIONS_TOTAL,
+    )
     from schemas import (  # type: ignore
         ApartmentPredictRequest,
         BatchPredictionResult,
@@ -42,16 +59,28 @@ except ImportError:
     from service import inference_service  # type: ignore
 
 
+def update_active_model_metric(info: ModelInfoResponse) -> None:
+    """Обновляет значение Prometheus Gauge для текущей активной модели."""
+    ACTIVE_MODEL_VERSION.clear()
+    ACTIVE_MODEL_VERSION.labels(
+        model_name=info.model_name,
+        model_version=info.version or "unknown",
+        model_source=info.source,
+    ).set(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Управление жизненным циклом приложения:
-    при старте прогревает ML-модель в памяти (MLflow или local fallback).
+    при старте прогревает ML-модель в памяти (MLflow или local fallback)
+    и регистрирует начальные метрики.
     """
     logger.info("Initializing Estate Intelligence Inference API...")
     try:
-        model = inference_service.get_model()
+        _ = inference_service.get_model()
         info = inference_service.get_model_info()
+        update_active_model_metric(info)
         logger.success(
             f"Production model '{info.model_name}' (version: {info.version}, source: {info.source}) loaded successfully."
         )
@@ -73,7 +102,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS middleware для подключения фронтенда / дашбордов
+# CORS middleware для подключения веб-клиентов и дашбордов
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -81,6 +110,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Автоматическая инструментация стандартных HTTP-метрик для Prometheus
+instrumentator = Instrumentator(
+    should_group_status_codes=False,
+    should_ignore_untemplated=True,
+    should_respect_env_var=False,
+    should_instrument_requests_inprogress=True,
+    excluded_handlers=["/metrics", "/health"],
+    inprogress_name="estate_http_requests_inprogress",
+    inprogress_labels=True,
+)
+instrumentator.instrument(app).expose(app, endpoint="/metrics", tags=["Monitoring"])
 
 
 @app.middleware("http")
@@ -151,16 +192,38 @@ def predict_apartment(request: ApartmentPredictRequest) -> PredictionResult:
     и возвращает прогноз арендной ставки в рублях/месяц.
     """
     try:
+        t_start = time.perf_counter()
         predictions = inference_service.predict(request)
+        duration = time.perf_counter() - t_start
+
         if not predictions:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Inference generated empty result.",
             )
-        return predictions[0]
+
+        res = predictions[0]
+
+        # Фиксация бизнес-метрик инференса в Prometheus
+        INFERENCE_LATENCY_SECONDS.observe(duration)
+        PREDICTIONS_TOTAL.labels(
+            status="success",
+            rooms=str(res.rooms),
+            model_version=res.model_version or "unknown",
+            model_source=res.model_source,
+        ).inc()
+        PREDICTED_RENT_RUB.observe(float(res.predicted_rent_rub))
+
+        return res
     except HTTPException:
         raise
     except Exception as exc:
+        PREDICTIONS_TOTAL.labels(
+            status="error",
+            rooms=str(request.rooms),
+            model_version="error",
+            model_source="error",
+        ).inc()
         logger.error(f"Inference error: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -180,7 +243,24 @@ def predict_batch(request: BatchPredictRequest) -> BatchPredictionResult:
     """
     t0 = time.perf_counter()
     try:
+        batch_len = len(request.apartments)
+        BATCH_SIZE.observe(batch_len)
+
+        t_model_start = time.perf_counter()
         predictions = inference_service.predict(request.apartments)
+        model_duration = time.perf_counter() - t_model_start
+        INFERENCE_LATENCY_SECONDS.observe(model_duration)
+
+        # Фиксация метрик по каждому элементу пакета
+        for p in predictions:
+            PREDICTIONS_TOTAL.labels(
+                status="success",
+                rooms=str(p.rooms),
+                model_version=p.model_version or "unknown",
+                model_source=p.model_source,
+            ).inc()
+            PREDICTED_RENT_RUB.observe(float(p.predicted_rent_rub))
+
         took_ms = round((time.perf_counter() - t0) * 1000, 2)
         return BatchPredictionResult(
             items=predictions,
@@ -188,6 +268,12 @@ def predict_batch(request: BatchPredictRequest) -> BatchPredictionResult:
             took_ms=took_ms,
         )
     except Exception as exc:
+        PREDICTIONS_TOTAL.labels(
+            status="error",
+            rooms="batch",
+            model_version="error",
+            model_source="error",
+        ).inc()
         logger.error(f"Batch inference error: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -208,8 +294,11 @@ def reload_model() -> ModelInfoResponse:
     """
     try:
         info = inference_service.reload()
+        update_active_model_metric(info)
+        MODEL_RELOAD_TOTAL.labels(status="success").inc()
         return info
     except Exception as exc:
+        MODEL_RELOAD_TOTAL.labels(status="error").inc()
         logger.error(f"Model reload failed: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

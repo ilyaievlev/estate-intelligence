@@ -1,0 +1,162 @@
+# Default values for estate-intelligence.
+# This is a YAML-formatted file.
+
+global:
+  environment: local
+  dagsHostPath: /Users/renegadik/petprojects/estate-intelligence/dags
+  projectHostPath: /Users/renegadik/petprojects/estate-intelligence
+
+# PostgreSQL + PostGIS (StatefulSet)
+postgres:
+  image:
+    repository: imresamu/postgis
+    tag: "16-3.5-alpine"
+    pullPolicy: IfNotPresent
+  user: estate
+  password: estate
+  database: estate
+  service:
+    type: LoadBalancer
+    port: 5432
+    externalPort: 5433
+  persistence:
+    size: 5Gi
+
+# ClickHouse (StatefulSet)
+clickhouse:
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.8"
+    pullPolicy: IfNotPresent
+  user: estate
+  password: estate
+  database: estate
+  service:
+    type: LoadBalancer
+    httpPort: 8123
+    nativePort: 9000
+    prometheusPort: 9363
+  persistence:
+    size: 10Gi
+
+# MinIO S3 Object Storage (StatefulSet + Bucket Init)
+minio:
+  image:
+    repository: cgr.dev/chainguard/minio
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  rootUser: minioadmin
+  rootPassword: minioadmin
+  defaultBucket: mlflow
+  service:
+    type: LoadBalancer
+    apiPort: 9000
+    apiExternalPort: 9010
+    consolePort: 9001
+    consoleExternalPort: 9011
+  persistence:
+    size: 5Gi
+
+# MLflow Tracking Server (Deployment)
+mlflow:
+  image:
+    repository: estate-mlflow
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: LoadBalancer
+    port: 5000
+    externalPort: 5001
+
+# FastAPI ML Inference (Deployment + HPA)
+inference:
+  image:
+    repository: estate-inference
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: LoadBalancer
+    port: 8000
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "1536Mi"
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+
+# Apache Airflow с KubernetesExecutor
+airflow:
+  image:
+    repository: estate-airflow
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  executor: KubernetesExecutor
+  user:
+    username: admin
+    password: admin
+    email: admin@estate.local
+  service:
+    type: LoadBalancer
+    port: 8080
+  worker:
+    image: estate-airflow:latest
+    pullPolicy: IfNotPresent
+  resources:
+    scheduler:
+      limits:
+        cpu: "1000m"
+        memory: "1536Mi"
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+    webserver:
+      limits:
+        cpu: "1000m"
+        memory: "1536Mi"
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+
+# Мониторинг (Prometheus + Grafana)
+monitoring:
+  prometheus:
+    image:
+      repository: prom/prometheus
+      tag: "v2.54.1"
+      pullPolicy: IfNotPresent
+    service:
+      type: LoadBalancer
+      port: 9090
+    persistence:
+      size: 5Gi
+  grafana:
+    image:
+      repository: grafana/grafana
+      tag: "11.2.0"
+      pullPolicy: IfNotPresent
+    adminUser: admin
+    adminPassword: admin
+    service:
+      type: LoadBalancer
+      port: 3000
+    persistence:
+      size: 2Gi
+
+# Параметры сборщика объявлений Avito
+collector:
+  intervalSec: 0
+  urls: "https://www.avito.ru/moskva/kvartiry/sdam/na_dlitelnyy_srok-ASgBAgICAkSSA8gQ8AeQUg?cd=2&context=H4sIAAAAAAAA_wEmANn_YToxOntzOjE6InkiO3M6MTY6InRCTlVOYnNSbTFNZklYdlQiO30ID_1RJgAAAA&localPriority=0"
+  useBypassApi: true
+  # секреты задаются в values.local.yaml (не коммитится)
+  cookiesApiKey: ""
+  proxyString: ""
+  count: 10
+

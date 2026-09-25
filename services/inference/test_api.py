@@ -143,6 +143,16 @@ def test_model_reload():
     assert data["status"] == "READY"
 
 
+def test_metrics_endpoint():
+    """Проверка эндпоинта сбора метрик Prometheus /metrics."""
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    content = response.text
+    assert "estate_active_model_info" in content
+    assert "estate_predictions_total" in content
+    assert "estate_inference_latency_seconds" in content
+
+
 if __name__ == "__main__":
     print("Running test_health_endpoint...")
     test_health_endpoint()
@@ -156,4 +166,6 @@ if __name__ == "__main__":
     test_predict_validation_error()
     print("Running test_model_reload...")
     test_model_reload()
+    print("Running test_metrics_endpoint...")
+    test_metrics_endpoint()
     print("ALL TESTS PASSED SUCCESSFULLY!")

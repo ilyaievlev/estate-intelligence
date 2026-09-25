@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
 from loguru import logger
+
+# Поиск и подгрузка основного .env проекта
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if (_PROJECT_ROOT / ".env").is_file():
+    load_dotenv(_PROJECT_ROOT / ".env", override=False)
+else:
+    load_dotenv(find_dotenv(usecwd=True), override=False)
 
 from domain import Apartment
 from sources.avito.client import AvitoClient

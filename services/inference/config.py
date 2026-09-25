@@ -3,6 +3,16 @@ from __future__ import annotations
 import os
 import warnings
 from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
+
+BASE_DIR: Path = Path(__file__).resolve().parent
+PROJECT_ROOT: Path = BASE_DIR.parent.parent
+
+# Поиск и загрузка общего .env из корня проекта
+if (PROJECT_ROOT / ".env").is_file():
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+else:
+    load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Отключение информационных сообщений и предупреждений сторонних библиотек
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
@@ -18,7 +28,10 @@ MOSCOW_CENTER_LON: float = float(os.getenv("MOSCOW_CENTER_LON", "37.618423"))
 
 # Параметры HTTP-сервера инференса
 INFERENCE_HOST: str = os.getenv("INFERENCE_HOST", "0.0.0.0")
-INFERENCE_PORT: int = int(os.getenv("INFERENCE_PORT", "8000"))
+_raw_port: str = os.getenv("INFERENCE_SERVER_PORT") or os.getenv("INFERENCE_PORT", "8000")
+if _raw_port.startswith("tcp://"):
+    _raw_port = _raw_port.split(":")[-1]
+INFERENCE_PORT: int = int(_raw_port)
 
 # Параметры подключения к реестру MLflow Model Registry
 MLFLOW_TRACKING_URI: str = os.getenv(
@@ -33,8 +46,6 @@ MLFLOW_S3_ENDPOINT_URL: str = os.getenv("MLFLOW_S3_ENDPOINT_URL", "http://localh
 MLFLOW_S3_IGNORE_TLS: str = os.getenv("MLFLOW_S3_IGNORE_TLS", "true")
 
 # Локальные пути к резервной копии модели
-BASE_DIR: Path = Path(__file__).resolve().parent
-PROJECT_ROOT: Path = BASE_DIR.parent.parent
 DEFAULT_LOCAL_MODEL_PATH: Path = (
     PROJECT_ROOT / "services" / "ml" / "artifacts" / "models" / "catboost_latest.cbm"
 )

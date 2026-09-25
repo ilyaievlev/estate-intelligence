@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  labels:
+    app: airflow-scheduler
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: airflow-scheduler
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          command:
+            - airflow
+            - scheduler
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          resources:
+            {{- toYaml .Values.airflow.resources.scheduler | nindent 12 }}
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: estate
+              mountPath: /opt/estate
+            - name: pod-template
+              mountPath: /opt/airflow/pod_templates
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - airflow jobs check --job-type SchedulerJob --hostname $(hostname)
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 25
+            failureThreshold: 5
+      volumes:
+        - name: dags
+          hostPath:
+            path: {{ .Values.global.dagsHostPath }}
+        - name: estate
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}
+        - name: pod-template
+          configMap:
+            name: airflow-pod-template

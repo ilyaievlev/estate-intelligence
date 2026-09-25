@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# If arguments are passed (e.g. from KubernetesExecutor: airflow tasks run ...), execute them directly
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 echo "=================================================="
 echo " 🚀 Initializing Apache Airflow for Estate Intelligence"
 echo "=================================================="

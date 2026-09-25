@@ -9,11 +9,14 @@ from dotenv import find_dotenv, load_dotenv
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-# Поиск и загрузка файла .env из корня проекта
-load_dotenv(find_dotenv(usecwd=True))
-
 ML_DIR = Path(__file__).resolve().parent
 REPO_ROOT = ML_DIR.parent.parent
+
+# Поиск и загрузка общего файла .env из корня проекта
+if (REPO_ROOT / ".env").is_file():
+    load_dotenv(REPO_ROOT / ".env", override=False)
+else:
+    load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # PostgreSQL connection string
 DATABASE_URL = os.getenv(
