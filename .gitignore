@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+logs/
+*.log
+.DS_Store
+
+# Collector: локальные данные и одноразовые скрипты
+services/collector/apartments.jsonl
+services/collector/generate_apartments_geo.py
+services/collector/load_apartments.py
+
+# ML
+catboost_info/
+services/ml/artifacts/
+mlruns/
+.ipynb_checkpoints/

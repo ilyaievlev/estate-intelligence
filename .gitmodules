@@ -1,0 +1,4 @@
+[submodule "services/collector/vendor/parser_avito"]
+	path = services/collector/vendor/parser_avito
+	url = https://github.com/ilyaievlev/parser_avito.git
+	branch = estate

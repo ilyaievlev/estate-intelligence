@@ -1,0 +1,1 @@
+# Зависимости живут по сервисам: services/<service>/requirements.txt
