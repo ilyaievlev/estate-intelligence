@@ -7,7 +7,7 @@ import psycopg
 
 from domain import Apartment
 
-# first_seen_at не входит в SET: при повторной встрече остаётся первоначальным.
+# SQL-запрос обновления/вставки объявлений (поле first_seen_at сохраняется при конфликте)
 _UPSERT_SQL = """
 INSERT INTO apartments (
     source,

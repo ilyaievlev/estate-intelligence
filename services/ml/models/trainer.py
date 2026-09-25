@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -9,18 +12,43 @@ from loguru import logger
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, r2_score
 from sklearn.model_selection import train_test_split
 
+ML_DIR = Path(__file__).resolve().parent.parent
+if str(ML_DIR) not in sys.path:
+    sys.path.insert(0, str(ML_DIR))
+
 from config import RANDOM_STATE, TEST_SIZE
 from features.engineering import CATEGORICAL_FEATURES
+
+
+@dataclass
+class TrainResult:
+    """Результат обучения модели CatBoost."""
+
+    model: CatBoostRegressor
+    metrics: dict[str, float]
+    feature_importances: pd.Series
+    X_train: pd.DataFrame
+    y_train: pd.Series
+    X_test: pd.DataFrame
+    y_test: pd.Series
+    y_pred: np.ndarray
+    params: dict[str, Any]
+
+    def __iter__(self):
+        """Поддержка распаковки кортежа: model, metrics, importances = result"""
+        return iter((self.model, self.metrics, self.feature_importances))
 
 
 def train_catboost_model(
     X: pd.DataFrame,
     y: pd.Series,
     params: dict[str, Any] | None = None,
-) -> tuple[CatBoostRegressor, dict[str, float], pd.Series]:
+    test_size: float = TEST_SIZE,
+    random_state: int = RANDOM_STATE,
+) -> TrainResult:
     """
     Обучение модели CatBoostRegressor на признаках с валидацией на тесте.
-    Возвращает (модель, словарь_метрик, важность_признаков).
+    Возвращает TrainResult с моделью, метриками, важностью признаков и тестовыми выборками.
     """
     default_params = {
         "iterations": 2500,
@@ -28,19 +56,19 @@ def train_catboost_model(
         "depth": 7,
         "loss_function": "MAE",
         "eval_metric": "MAE",
-        "random_seed": RANDOM_STATE,
+        "random_seed": random_state,
         "early_stopping_rounds": 150,
         "verbose": 200,
         "allow_writing_files": False,
     }
     model_params = {**default_params, **(params or {})}
 
-    # Разбиение 80% train / 20% test
+    # Разбиение train / test
     X_train_df, X_test_df, y_train_s, y_test_s = train_test_split(
         X,
         y,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
+        test_size=test_size,
+        random_state=random_state,
     )
     X_train = pd.DataFrame(X_train_df)
     X_test = pd.DataFrame(X_test_df)
@@ -52,7 +80,7 @@ def train_catboost_model(
         X_train,
         y_train,
         test_size=0.15,
-        random_state=RANDOM_STATE,
+        random_state=random_state,
     )
     X_tr = pd.DataFrame(X_tr_df)
     X_val = pd.DataFrame(X_val_df)
@@ -75,7 +103,7 @@ def train_catboost_model(
     )
 
     # Оценка на отложенном тесте
-    y_pred = model.predict(X_test)
+    y_pred = np.asarray(model.predict(X_test))
     y_test_arr = np.asarray(y_test)
 
     mae = float(mean_absolute_error(y_test_arr, y_pred))
@@ -100,4 +128,14 @@ def train_catboost_model(
         index=X.columns,
     ).sort_values(ascending=False)
 
-    return model, metrics, feature_importances
+    return TrainResult(
+        model=model,
+        metrics=metrics,
+        feature_importances=feature_importances,
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_test,
+        y_test=y_test,
+        y_pred=y_pred,
+        params=model_params,
+    )
