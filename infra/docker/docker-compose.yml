@@ -4,14 +4,16 @@ name: estate-intelligence
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Postgres 16 + PostGIS; официальный postgis/postgis собран только под amd64
+    image: imresamu/postgis:16-3.5-alpine
     container_name: estate-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-estate}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-estate}
       POSTGRES_DB: ${POSTGRES_DB:-estate}
     ports:
-      - "5432:5432"
+      # 5433 на хосте: 5432 часто занят локальным Postgres (Homebrew)
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - estate_pgdata:/var/lib/postgresql/data
       - ../../services/collector/sql/postgres:/docker-entrypoint-initdb.d:ro

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     source           TEXT NOT NULL,
     external_id      TEXT NOT NULL,
     url              TEXT NOT NULL,
+    monthly_rent     INTEGER,
     rooms            SMALLINT,
     area             REAL,
     floor            SMALLINT,

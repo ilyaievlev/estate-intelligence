@@ -4,3 +4,6 @@ __pycache__/
 .env
 logs/
 *.log
+services/collector/apartments.jsonl
+services/collector/generate_apartments_geo.py
+services/collector/load_apartments.py
