@@ -14,6 +14,7 @@ venv = ".venv"
 extraPaths = [
     "services/collector",
     "services/collector/vendor/parser_avito",
+    "services/ml",
 ]
 ignore = [
     "**/.venv",
