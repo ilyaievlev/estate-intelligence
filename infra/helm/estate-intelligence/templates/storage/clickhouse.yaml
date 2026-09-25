@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clickhouse-secret
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  CLICKHOUSE_USER: {{ .Values.clickhouse.user | quote }}
+  CLICKHOUSE_PASSWORD: {{ .Values.clickhouse.password | quote }}
+  CLICKHOUSE_DB: {{ .Values.clickhouse.database | quote }}
+  CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-pvc
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.clickhouse.persistence.size }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-prometheus-config
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+data:
+  prometheus.xml: |
+    <clickhouse>
+        <prometheus>
+            <endpoint>/metrics</endpoint>
+            <port>9363</port>
+            <metrics>true</metrics>
+            <events>true</events>
+            <asynchronous_metrics>true</asynchronous_metrics>
+            <status_info>true</status_info>
+        </prometheus>
+    </clickhouse>
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: "{{ .Values.clickhouse.image.repository }}:{{ .Values.clickhouse.image.tag }}"
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+            - containerPort: 9363
+              name: prometheus
+          envFrom:
+            - secretRef:
+                name: clickhouse-secret
+          volumeMounts:
+            - name: clickhouse-data
+              mountPath: /var/lib/clickhouse
+            - name: prometheus-config
+              mountPath: /etc/clickhouse-server/config.d/prometheus.xml
+              subPath: prometheus.xml
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: clickhouse-data
+          persistentVolumeClaim:
+            claimName: clickhouse-pvc
+        - name: prometheus-config
+          configMap:
+            name: clickhouse-prometheus-config
+        - name: init-scripts
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}/services/collector/sql/clickhouse
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.clickhouse.service.httpPort }}
+      targetPort: 8123
+    - name: native
+      port: {{ .Values.clickhouse.service.nativePort }}
+      targetPort: 9000
+    - name: prometheus
+      port: {{ .Values.clickhouse.service.prometheusPort }}
+      targetPort: 9363
+  selector:
+    app: clickhouse
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-external
+  labels:
+    app: clickhouse
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: {{ .Values.clickhouse.service.httpPort }}
+      targetPort: 8123
+    - name: prometheus
+      port: {{ .Values.clickhouse.service.prometheusPort }}
+      targetPort: 9363
+  selector:
+    app: clickhouse

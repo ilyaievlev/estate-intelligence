@@ -28,7 +28,7 @@ def get_client() -> Client:
 
 
 def save_snapshots(apartments: list[Apartment]) -> int:
-    """Append-only: одна строка на объявление за run, одним batch insert."""
+    """Сохранение снимков объявлений в ClickHouse (append-only) одним пакетом."""
     if not apartments:
         return 0
 

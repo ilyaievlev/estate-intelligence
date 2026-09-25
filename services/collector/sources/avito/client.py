@@ -1,10 +1,3 @@
-"""
-Тонкий адаптер к fork ilyaievlev/parser_avito (ветка estate).
-
-Снаружи: list[Apartment].
-Внутри: collect_ads + to_ml_dicts из vendor.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -14,7 +7,6 @@ from pathlib import Path
 from loguru import logger
 
 from domain import Apartment
-
 from .mapper import ml_dict_to_apartment
 
 _VENDOR_ROOT = Path(__file__).resolve().parents[2] / "vendor" / "parser_avito"
@@ -22,8 +14,8 @@ _VENDOR_ROOT = Path(__file__).resolve().parents[2] / "vendor" / "parser_avito"
 if str(_VENDOR_ROOT) not in sys.path:
     sys.path.insert(0, str(_VENDOR_ROOT))
 
-# vendor пишет logs/, storage/ (cookies) и database.db относительно cwd,
-# поэтому импорт и все вызовы vendor идут из его собственной папки.
+# Сторонний парсер сохраняет cookies и logs относительно своего каталога,
+# поэтому импорт и вызовы выполняются из его рабочей папки.
 with contextlib.chdir(_VENDOR_ROOT):
     from apartment_ml import to_ml_dicts
     from fetch_ml_data import collect_ads
@@ -32,6 +24,7 @@ with contextlib.chdir(_VENDOR_ROOT):
 
 
 class AvitoClient:
+    """Клиент сбора объявлений с Avito через встроенный парсер."""
     name = "avito"
 
     def __init__(self, config_path: Path | None = None):
@@ -40,7 +33,7 @@ class AvitoClient:
             self.parser = AvitoParse(load_avito_config(str(path)))
 
     def fetch(self) -> list[Apartment]:
-        """Собрать объявления и привести к Apartment. Страницы = config.count."""
+        """Собрать объявления и привести их к доменной модели Apartment."""
         with contextlib.chdir(_VENDOR_ROOT):
             ads = collect_ads(self.parser)
         rows = to_ml_dicts(ads)
@@ -50,7 +43,7 @@ class AvitoClient:
             try:
                 apartments.append(ml_dict_to_apartment(row))
             except (ValueError, TypeError, KeyError) as err:
-                logger.warning(f"skip id={row.get('id')}: {err}")
+                logger.warning(f"Пропуск объявления id={row.get('id')}: {err}")
 
-        logger.info(f"Item={len(rows)} → Apartment={len(apartments)}")
+        logger.info(f"Получено объявлений: {len(rows)} → Сформировано объектов: {len(apartments)}")
         return apartments

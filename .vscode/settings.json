@@ -6,9 +6,11 @@
     "python.analysis.venvPath": "${workspaceFolder}/services/collector",
     "python.analysis.venv": ".venv",
     "python.analysis.extraPaths": [
+        "${workspaceFolder}",
         "${workspaceFolder}/services/collector",
         "${workspaceFolder}/services/collector/vendor/parser_avito",
-        "${workspaceFolder}/services/ml"
+        "${workspaceFolder}/services/ml",
+        "${workspaceFolder}/services/inference"
     ],
     "python.analysis.ignore": [
         "**/.venv/**",
@@ -27,9 +29,11 @@
     "cursorpyright.analysis.venvPath": "${workspaceFolder}/services/collector",
     "cursorpyright.analysis.venv": ".venv",
     "cursorpyright.analysis.extraPaths": [
+        "${workspaceFolder}",
         "${workspaceFolder}/services/collector",
         "${workspaceFolder}/services/collector/vendor/parser_avito",
-        "${workspaceFolder}/services/ml"
+        "${workspaceFolder}/services/ml",
+        "${workspaceFolder}/services/inference"
     ],
     "cursorpyright.analysis.ignore": [
         "**/.venv/**",

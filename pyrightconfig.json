@@ -1,0 +1,32 @@
+{
+  "include": [
+    "services",
+    "dags"
+  ],
+  "exclude": [
+    "**/.venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "services/collector/vendor/parser_avito"
+  ],
+  "venvPath": "services/collector",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "extraPaths": [
+    ".",
+    "services/collector",
+    "services/collector/vendor/parser_avito",
+    "services/ml",
+    "services/inference"
+  ],
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": "dags",
+      "reportMissingImports": "none"
+    },
+    {
+      "root": "services"
+    }
+  ]
+}

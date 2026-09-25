@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  labels:
+    app: airflow-webserver
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-webserver
+  template:
+    metadata:
+      labels:
+        app: airflow-webserver
+    spec:
+      serviceAccountName: airflow
+      initContainers:
+        - name: init-airflow-db
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for PostgreSQL..."
+              until python -c "import psycopg; psycopg.connect('${DATABASE_URL}')" 2>/dev/null; do
+                sleep 2
+              done
+              echo "Running Airflow DB migration..."
+              airflow db migrate
+              echo "Ensuring Airflow admin user exists..."
+              airflow users create \
+                --username "${_AIRFLOW_WWW_USER_USERNAME:-admin}" \
+                --password "${_AIRFLOW_WWW_USER_PASSWORD:-admin}" \
+                --firstname Admin \
+                --lastname User \
+                --role Admin \
+                --email "${_AIRFLOW_WWW_USER_EMAIL:-admin@estate.local}" || true
+      containers:
+        - name: airflow-webserver
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          command:
+            - airflow
+            - webserver
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          resources:
+            {{- toYaml .Values.airflow.resources.webserver | nindent 12 }}
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: estate
+              mountPath: /opt/estate
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 15
+      volumes:
+        - name: dags
+          hostPath:
+            path: {{ .Values.global.dagsHostPath }}
+        - name: estate
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow
+  labels:
+    app: airflow-webserver
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.airflow.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.airflow.service.port }}
+      targetPort: 8080
+  selector:
+    app: airflow-webserver

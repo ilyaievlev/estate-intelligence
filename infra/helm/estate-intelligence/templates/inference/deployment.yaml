@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  labels:
+    app: inference
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.inference.autoscaling.enabled }}
+  replicas: {{ .Values.inference.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      containers:
+        - name: inference
+          image: "{{ .Values.inference.image.repository }}:{{ .Values.inference.image.tag }}"
+          imagePullPolicy: {{ .Values.inference.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow:5000"
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: "http://minio:9000"
+            - name: MLFLOW_S3_IGNORE_TLS
+              value: "true"
+            - name: AWS_ACCESS_KEY_ID
+              value: {{ .Values.minio.rootUser | quote }}
+            - name: AWS_SECRET_ACCESS_KEY
+              value: {{ .Values.minio.rootPassword | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+            - name: MINIO_DEFAULT_BUCKET
+              value: {{ .Values.minio.defaultBucket | quote }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres:5432/{{ .Values.postgres.database }}"
+            - name: PYTHONPATH
+              value: "/app:/app/services/inference:/app/services/ml"
+          resources:
+            {{- toYaml .Values.inference.resources | nindent 12 }}
+          volumeMounts:
+            - name: ml-code
+              mountPath: /app/services/ml
+            - name: inference-code
+              mountPath: /app/services/inference
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: ml-code
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}/services/ml
+        - name: inference-code
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}/services/inference
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+  labels:
+    app: inference
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.inference.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.inference.service.port }}
+      targetPort: 8000
+  selector:
+    app: inference
+---
+{{- if .Values.inference.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-hpa
+  labels:
+    app: inference
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference
+  minReplicas: {{ .Values.inference.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.inference.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.inference.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

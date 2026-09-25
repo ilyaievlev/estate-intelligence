@@ -1,0 +1,64 @@
+FROM apache/airflow:2.10.2
+
+USER root
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+USER airflow
+
+# Base Airflow Python additions for lightweight tasks
+RUN pip install --no-cache-dir \
+    clickhouse-connect \
+    "psycopg[binary]"
+
+# 1. Virtual environment for collector service (Avito scraper + DB writers)
+RUN python -m venv /opt/airflow/venvs/collector && \
+    /opt/airflow/venvs/collector/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/airflow/venvs/collector/bin/pip install --no-cache-dir \
+      psycopg[binary] \
+      clickhouse-connect \
+      python-dotenv \
+      loguru \
+      pydantic \
+      curl_cffi \
+      beautifulsoup4 \
+      requests \
+      PyYAML \
+      tomli_w \
+      tzlocal \
+      tzdata \
+      httpx \
+      openpyxl \
+      pyexcel \
+      pyexcel-io \
+      pyexcel-xlsx \
+      playwright-stealth
+
+# 2. Virtual environment for ML service (CatBoost + MLflow + S3)
+RUN python -m venv /opt/airflow/venvs/ml && \
+    /opt/airflow/venvs/ml/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/airflow/venvs/ml/bin/pip install --no-cache-dir \
+      catboost \
+      scikit-learn \
+      pandas \
+      numpy \
+      "psycopg[binary]" \
+      python-dotenv \
+      loguru \
+      joblib \
+      "mlflow>=3.0.0" \
+      boto3
+
+USER root
+COPY infra/docker/airflow_entrypoint.sh /opt/airflow/airflow_entrypoint.sh
+RUN chmod +x /opt/airflow/airflow_entrypoint.sh
+
+USER airflow
+
+WORKDIR /opt/airflow
+ENTRYPOINT ["/opt/airflow/airflow_entrypoint.sh"]

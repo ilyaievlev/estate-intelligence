@@ -26,6 +26,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     container_name: estate-clickhouse
+    restart: unless-stopped
     environment:
       # БД фиксирована: на неё ссылается sql/clickhouse/*.sql
       CLICKHOUSE_DB: estate
@@ -35,6 +36,7 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
+      - "${CLICKHOUSE_PROMETHEUS_PORT:-9363}:9363"
     ulimits:
       nofile:
         soft: 262144
@@ -42,6 +44,7 @@ services:
     volumes:
       - estate_chdata:/var/lib/clickhouse
       - ../../services/collector/sql/clickhouse:/docker-entrypoint-initdb.d:ro
+      - ../clickhouse/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
       interval: 5s
@@ -51,6 +54,7 @@ services:
   minio:
     image: cgr.dev/chainguard/minio:latest
     container_name: estate-minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -82,7 +86,10 @@ services:
     restart: "no"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.0
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.mlflow
+    image: estate-mlflow:latest
     container_name: estate-mlflow
     restart: unless-stopped
     depends_on:
@@ -90,6 +97,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "${MLFLOW_PORT:-5001}:5000"
     environment:
@@ -97,23 +106,194 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       MLFLOW_S3_IGNORE_TLS: "true"
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        pip install --no-cache-dir --upgrade "mlflow>=3.0.0" psycopg2-binary boto3 &&
-        mlflow server
-        --backend-store-uri postgresql://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/mlflow
-        --default-artifact-root s3://${MINIO_DEFAULT_BUCKET:-mlflow}/
-        --host 0.0.0.0
-        --port 5000
+    command: >
+      mlflow server
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/mlflow
+      --default-artifact-root s3://${MINIO_DEFAULT_BUCKET:-mlflow}/
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts "*"
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:5000/health\")'"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
+
+  inference:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.inference
+    image: estate-inference:latest
+    container_name: estate-inference
+    restart: unless-stopped
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${INFERENCE_PORT:-8000}:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_S3_IGNORE_TLS: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_DEFAULT_REGION: us-east-1
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-mlflow}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/estate
+      PYTHONPATH: /app:/app/services/inference:/app/services/ml
+    volumes:
+      - ../../services/ml:/app/services/ml
+      - ../../services/inference:/app/services/inference
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  collector:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.collector
+    image: estate-collector:latest
+    container_name: estate-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/estate
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DATABASE: estate
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-estate}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-estate}
+      COLLECTOR_INTERVAL_SEC: ${COLLECTOR_INTERVAL_SEC:-0}
+      AVITO_URLS: ${AVITO_URLS:-}
+      AVITO_USE_BYPASS_API: ${AVITO_USE_BYPASS_API:-true}
+      AVITO_COOKIES_API_KEY: ${AVITO_COOKIES_API_KEY:-}
+      AVITO_PROXY_STRING: ${AVITO_PROXY_STRING:-}
+      AVITO_COUNT: ${AVITO_COUNT:-10}
+    volumes:
+      - ../../services/collector:/app/services/collector
+    restart: "no"
+
+  airflow:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.airflow
+    image: estate-airflow:latest
+    container_name: estate-airflow
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Moscow
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Europe/Moscow
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD:-admin}
+      _AIRFLOW_WWW_USER_EMAIL: ${AIRFLOW_EMAIL:-admin@estate.local}
+      # Database and ClickHouse connection envs for collector & ML scripts
+      DATABASE_URL: postgresql://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate}@postgres:5432/estate
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DATABASE: estate
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-estate}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-estate}
+      # MLflow & MinIO connection envs for ML scripts
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_S3_IGNORE_TLS: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_DEFAULT_REGION: us-east-1
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-mlflow}
+      PYTHONPATH: /opt/estate/services/ml:/opt/estate/services/collector
+    volumes:
+      - ../../dags:/opt/airflow/dags
+      - ../..:/opt/estate
+      - estate_airflow_logs:/opt/airflow/logs
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/health\")'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: estate-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - estate_prometheusdata:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: estate-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-estate}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-estate}
+    volumes:
+      - ../grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../grafana/dashboards:/etc/grafana/dashboards:ro
+      - estate_grafanadata:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
 
 volumes:
   estate_pgdata:
   estate_chdata:
   estate_miniodata:
+  estate_airflow_logs:
+  estate_prometheusdata:
+  estate_grafanadata:

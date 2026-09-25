@@ -1,0 +1,46 @@
+FROM python:3.12-slim
+
+USER root
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Python dependencies
+COPY services/collector/requirements.txt /app/services/collector/requirements.txt
+COPY services/collector/vendor/parser_avito/requirements.txt /app/services/collector/vendor/parser_avito/requirements.txt
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+      psycopg[binary] \
+      clickhouse-connect \
+      python-dotenv \
+      loguru \
+      pydantic \
+      curl_cffi \
+      beautifulsoup4 \
+      requests \
+      PyYAML \
+      tomli_w \
+      tzlocal \
+      tzdata \
+      httpx \
+      openpyxl \
+      pyexcel \
+      pyexcel-io \
+      pyexcel-xlsx \
+      playwright-stealth
+
+# Copy service sources
+COPY services/collector /app/services/collector
+
+WORKDIR /app/services/collector
+ENV PYTHONPATH=/app/services/collector:/app/services/collector/vendor/parser_avito
+
+ENTRYPOINT ["python", "-u", "main.py"]

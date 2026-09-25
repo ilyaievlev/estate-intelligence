@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-env
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+data:
+  AIRFLOW__CORE__EXECUTOR: {{ .Values.airflow.executor | quote }}
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres:5432/airflow"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Moscow"
+  AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "Europe/Moscow"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+  AIRFLOW__WEBSERVER__WORKERS: "2"
+  AIRFLOW__CORE__DAGS_FOLDER: "/opt/airflow/dags"
+  AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE: {{ .Release.Namespace | quote }}
+  AIRFLOW__KUBERNETES_EXECUTOR__POD_TEMPLATE_FILE: "/opt/airflow/pod_templates/pod_template.yaml"
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_REPOSITORY: {{ .Values.airflow.image.repository | quote }}
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_TAG: {{ .Values.airflow.image.tag | quote }}
+  AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS: "True"
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_SERVICE_ACCOUNT_NAME: "airflow"
+  _AIRFLOW_WWW_USER_USERNAME: {{ .Values.airflow.user.username | quote }}
+  _AIRFLOW_WWW_USER_PASSWORD: {{ .Values.airflow.user.password | quote }}
+  _AIRFLOW_WWW_USER_EMAIL: {{ .Values.airflow.user.email | quote }}
+  DATABASE_URL: "postgresql://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres:5432/{{ .Values.postgres.database }}"
+  CLICKHOUSE_HOST: "clickhouse"
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DATABASE: {{ .Values.clickhouse.database | quote }}
+  CLICKHOUSE_USER: {{ .Values.clickhouse.user | quote }}
+  CLICKHOUSE_PASSWORD: {{ .Values.clickhouse.password | quote }}
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
+  MLFLOW_S3_ENDPOINT_URL: "http://minio:9000"
+  MLFLOW_S3_IGNORE_TLS: "true"
+  AWS_ACCESS_KEY_ID: {{ .Values.minio.rootUser | quote }}
+  AWS_SECRET_ACCESS_KEY: {{ .Values.minio.rootPassword | quote }}
+  AWS_DEFAULT_REGION: "us-east-1"
+  MINIO_DEFAULT_BUCKET: {{ .Values.minio.defaultBucket | quote }}
+  PYTHONPATH: "/opt/estate/services/ml:/opt/estate/services/collector"
+  COLLECTOR_INTERVAL_SEC: {{ .Values.collector.intervalSec | quote }}
+  AVITO_URLS: {{ .Values.collector.urls | quote }}
+  AVITO_USE_BYPASS_API: {{ .Values.collector.useBypassApi | quote }}
+  AVITO_COOKIES_API_KEY: {{ .Values.collector.cookiesApiKey | quote }}
+  AVITO_PROXY_STRING: {{ .Values.collector.proxyString | quote }}
+  AVITO_COUNT: {{ .Values.collector.count | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-pod-template
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+data:
+  pod_template.yaml: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: dummy-name
+    spec:
+      restartPolicy: Never
+      serviceAccountName: airflow
+      containers:
+        - name: base
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.airflow.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: estate
+              mountPath: /opt/estate
+            - name: estate
+              mountPath: /opt/airflow/airflow_entrypoint.sh
+              subPath: infra/docker/airflow_entrypoint.sh
+      volumes:
+        - name: dags
+          hostPath:
+            path: {{ .Values.global.dagsHostPath }}
+        - name: estate
+          hostPath:
+            path: {{ .Values.global.projectHostPath }}

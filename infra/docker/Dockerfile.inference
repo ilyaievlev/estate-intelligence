@@ -1,0 +1,32 @@
+FROM python:3.12-slim
+
+USER root
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Dependencies
+COPY services/inference/requirements.txt /app/services/inference/requirements.txt
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /app/services/inference/requirements.txt
+
+# Copy service source code: inference and ml (for shared features/models/artifacts)
+COPY services/ml /app/services/ml
+COPY services/inference /app/services/inference
+
+WORKDIR /app/services/inference
+ENV PYTHONPATH=/app:/app/services/inference:/app/services/ml
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=25s \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airflow
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-pod-manager
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/status", "pods/exec", "events"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-pod-manager-binding
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: airflow
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: airflow-pod-manager
+  apiGroup: rbac.authorization.k8s.io
