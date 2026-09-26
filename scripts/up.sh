@@ -68,7 +68,7 @@ build estate-mlflow:latest    Dockerfile.mlflow
 build estate-collector:latest Dockerfile.collector
 
 step "Helm"
-# Настройки парсера берутся из .env, чтобы секреты не хранились в чарте.
+# Все настройки берутся из .env, values.yaml хранит только значения по умолчанию.
 # .env не source'ится: в URL есть '&' и '?' без кавычек.
 env_get() {
   local line
@@ -77,27 +77,62 @@ env_get() {
   line="${line%\"}"; line="${line#\"}"
   printf '%s' "$line"
 }
-AVITO_URLS="$(env_get AVITO_URLS)"
-AVITO_USE_BYPASS_API="$(env_get AVITO_USE_BYPASS_API)"
-AVITO_COOKIES_API_KEY="$(env_get AVITO_COOKIES_API_KEY)"
-AVITO_PROXY_STRING="$(env_get AVITO_PROXY_STRING)"
-AVITO_COUNT="$(env_get AVITO_COUNT)"
 
 yaml_quote() { printf "'%s'" "${1//\'/\'\'}"; }
 
+# Строка "key: 'value'" с нужным отступом; пустые и незаданные переменные
+# пропускаются, чтобы сработал дефолт из values.yaml.
+# Секреты парсера пишутся всегда: пустое значение в .env значит "без ключа/прокси".
+from_env() {
+  local indent="$1" key="$2" var="$3" mode="${4:-}" value
+  value="$(env_get "$var")"
+  if [ -z "$value" ] && [ "$mode" != always ]; then return; fi
+  printf '%s%s: %s\n' "$indent" "$key" "$(yaml_quote "$value")"
+}
+
+# Заголовок секции печатается только если в ней есть значения: пустой
+# "postgres:" Helm понял бы как null и стёр бы дефолты секции.
+section() {
+  local header="$1" body="$2"
+  [ -n "$body" ] && printf '%s\n%s\n' "$header" "$body"
+  return 0
+}
+
 GENERATED_VALUES="$(mktemp -t estate-values.XXXXXX)"
 trap 'rm -f "$GENERATED_VALUES"' EXIT
-cat > "$GENERATED_VALUES" <<EOF
-global:
-  projectHostPath: $(yaml_quote "$ROOT")
-  dagsHostPath: $(yaml_quote "$ROOT/dags")
-collector:
-  urls: $(yaml_quote "${AVITO_URLS:-}")
-  useBypassApi: ${AVITO_USE_BYPASS_API:-false}
-  cookiesApiKey: $(yaml_quote "${AVITO_COOKIES_API_KEY:-}")
-  proxyString: $(yaml_quote "${AVITO_PROXY_STRING:-}")
-  count: ${AVITO_COUNT:-10}
-EOF
+{
+  echo "global:"
+  echo "  projectHostPath: $(yaml_quote "$ROOT")"
+  echo "  dagsHostPath: $(yaml_quote "$ROOT/dags")"
+  section "postgres:" "$(
+    from_env "  " user POSTGRES_USER
+    from_env "  " password POSTGRES_PASSWORD
+    from_env "  " database POSTGRES_DB)"
+  section "clickhouse:" "$(
+    from_env "  " user CLICKHOUSE_USER
+    from_env "  " password CLICKHOUSE_PASSWORD
+    from_env "  " database CLICKHOUSE_DATABASE)"
+  section "minio:" "$(
+    from_env "  " rootUser MINIO_ROOT_USER
+    from_env "  " rootPassword MINIO_ROOT_PASSWORD
+    from_env "  " defaultBucket MINIO_DEFAULT_BUCKET)"
+  section "airflow:"$'\n'"  user:" "$(
+    from_env "    " username AIRFLOW_USER
+    from_env "    " password AIRFLOW_PASSWORD
+    from_env "    " email AIRFLOW_EMAIL)"
+  section "monitoring:"$'\n'"  grafana:" "$(
+    from_env "    " adminUser GRAFANA_ADMIN_USER
+    from_env "    " adminPassword GRAFANA_ADMIN_PASSWORD)"
+  section "ml:" "$(
+    from_env "  " trainMaxAgeDays TRAIN_MAX_AGE_DAYS)"
+  section "collector:" "$(
+    from_env "  " intervalSec COLLECTOR_INTERVAL_SEC
+    from_env "  " urls AVITO_URLS
+    from_env "  " useBypassApi AVITO_USE_BYPASS_API
+    from_env "  " cookiesApiKey AVITO_COOKIES_API_KEY always
+    from_env "  " proxyString AVITO_PROXY_STRING always
+    from_env "  " count AVITO_COUNT)"
+} > "$GENERATED_VALUES"
 
 HELM_ARGS=(-f "$GENERATED_VALUES")
 [ -f "${CHART}/values.local.yaml" ] && HELM_ARGS+=(-f "${CHART}/values.local.yaml")
