@@ -40,6 +40,7 @@ data:
   AWS_DEFAULT_REGION: "us-east-1"
   MINIO_DEFAULT_BUCKET: {{ .Values.minio.defaultBucket | quote }}
   PYTHONPATH: "/opt/estate/services/ml:/opt/estate/services/collector"
+  TRAIN_MAX_AGE_DAYS: {{ .Values.ml.trainMaxAgeDays | quote }}
   COLLECTOR_INTERVAL_SEC: {{ .Values.collector.intervalSec | quote }}
   AVITO_URLS: {{ .Values.collector.urls | quote }}
   AVITO_USE_BYPASS_API: {{ .Values.collector.useBypassApi | quote }}

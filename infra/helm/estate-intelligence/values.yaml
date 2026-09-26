@@ -157,12 +157,18 @@ monitoring:
     persistence:
       size: 2Gi
 
-# Параметры сборщика объявлений Avito
+# Переобучение модели
+ml:
+  # Обучаться только на объявлениях, которые парсер видел за N дней (0 — все)
+  trainMaxAgeDays: 90
+
+# Параметры сборщика объявлений Avito.
+# scripts/up.sh (make up) переопределяет их значениями AVITO_* из корневого .env
 collector:
   intervalSec: 0
   urls: "https://www.avito.ru/moskva/kvartiry/sdam/na_dlitelnyy_srok-ASgBAgICAkSSA8gQ8AeQUg?cd=2&context=H4sIAAAAAAAA_wEmANn_YToxOntzOjE6InkiO3M6MTY6InRCTlVOYnNSbTFNZklYdlQiO30ID_1RJgAAAA&localPriority=0"
   useBypassApi: true
-  # секреты задаются в values.local.yaml (не коммитится)
+  # секреты задаются в корневом .env (не коммитится)
   cookiesApiKey: ""
   proxyString: ""
   count: 10
