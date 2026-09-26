@@ -14,6 +14,8 @@ data:
   AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
   AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
   AIRFLOW__WEBSERVER__WORKERS: "2"
+  AIRFLOW__WEBSERVER__SECRET_KEY: {{ .Values.airflow.secretKey | quote }}
+  AIRFLOW__LOGGING__BASE_LOG_FOLDER: "/opt/airflow/logs"
   AIRFLOW__CORE__DAGS_FOLDER: "/opt/airflow/dags"
   AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE: {{ .Release.Namespace | quote }}
   AIRFLOW__KUBERNETES_EXECUTOR__POD_TEMPLATE_FILE: "/opt/airflow/pod_templates/pod_template.yaml"
@@ -76,7 +78,12 @@ data:
             - name: estate
               mountPath: /opt/airflow/airflow_entrypoint.sh
               subPath: infra/docker/airflow_entrypoint.sh
+            - name: logs
+              mountPath: /opt/airflow/logs
       volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: airflow-logs
         - name: dags
           hostPath:
             path: {{ .Values.global.dagsHostPath }}

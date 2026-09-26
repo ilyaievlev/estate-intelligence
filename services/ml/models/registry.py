@@ -170,10 +170,12 @@ def log_and_register_model(
     model_name: str = MLFLOW_MODEL_NAME,
     input_example: pd.DataFrame | None = None,
     signature: ModelSignature | None = None,
+    register: bool = True,
 ) -> tuple[str, str]:
     """
     Логирует модель CatBoost в активный запуск MLflow и регистрирует в реестре Model Registry.
     Сохраняет версионированную локальную копию. Возвращает кортеж (run_id, version).
+    При register=False модель остаётся только артефактом запуска, version — пустая строка.
     """
     active_run = mlflow.active_run()
     if active_run is None:
@@ -195,9 +197,11 @@ def log_and_register_model(
     model_info = mlflow_catboost.log_model(
         cb_model=model,
         name="model",
-        registered_model_name=model_name,
+        registered_model_name=model_name if register else None,
         **log_kwargs,
     )
+    if not register:
+        return run_id, ""
 
     # Получение номера зарегистрированной версии модели
     version = str(model_info.registered_model_version or "")

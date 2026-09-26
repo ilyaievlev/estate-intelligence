@@ -43,6 +43,8 @@ spec:
               value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres:5432/{{ .Values.postgres.database }}"
             - name: PYTHONPATH
               value: "/app:/app/services/inference:/app/services/ml"
+            - name: MODEL_POLL_INTERVAL_SEC
+              value: {{ .Values.inference.modelPollIntervalSec | quote }}
           resources:
             {{- toYaml .Values.inference.resources | nindent 12 }}
           volumeMounts:
@@ -50,18 +52,23 @@ spec:
               mountPath: /app/services/ml
             - name: inference-code
               mountPath: /app/services/inference
+          # Трафик только на поды с загруженной моделью
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: 8000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 3
+          # Не зависит от MLflow: недоступный реестр не должен перезапускать поды
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: 8000
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
       volumes:
         - name: ml-code
           hostPath:

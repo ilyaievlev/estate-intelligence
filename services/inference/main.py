@@ -77,16 +77,18 @@ async def lifespan(app: FastAPI):
     и регистрирует начальные метрики.
     """
     logger.info("Initializing Estate Intelligence Inference API...")
+    inference_service.on_model_change = update_active_model_metric
     try:
         _ = inference_service.get_model()
         info = inference_service.get_model_info()
-        update_active_model_metric(info)
         logger.success(
             f"Production model '{info.model_name}' (version: {info.version}, source: {info.source}) loaded successfully."
         )
     except Exception as exc:
-        logger.error(f"Failed to preload model on startup: {exc}. Will retry on incoming request.")
+        logger.error(f"Failed to preload model on startup: {exc}. Background watcher will retry.")
+    inference_service.start_watcher()
     yield
+    inference_service.stop_watcher()
     logger.info("Inference API is shutting down.")
 
 
@@ -102,11 +104,12 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS middleware для подключения веб-клиентов и дашбордов
+# CORS middleware для подключения веб-клиентов и дашбордов.
+# API без cookie-авторизации, поэтому credentials не нужны (и с "*" они небезопасны).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -117,7 +120,7 @@ instrumentator = Instrumentator(
     should_ignore_untemplated=True,
     should_respect_env_var=False,
     should_instrument_requests_inprogress=True,
-    excluded_handlers=["/metrics", "/health"],
+    excluded_handlers=["/metrics", "/health", "/livez", "/readyz"],
     inprogress_name="estate_http_requests_inprogress",
     inprogress_labels=True,
 )
@@ -145,25 +148,32 @@ async def add_process_time_header(request: Request, call_next):
 )
 def health_check() -> HealthResponse:
     """
-    Возвращает статус работоспособности сервиса, информацию о загруженной модели в памяти
-    и подключении к реестру MLflow.
+    Возвращает статус сервиса и информацию о модели в памяти.
+    Модель здесь не загружается: этим занимается старт приложения и фоновый watcher.
     """
-    model_loaded = False
-    try:
-        inference_service.get_model()
-        model_loaded = True
-    except Exception:
-        model_loaded = False
-
-    model_info = inference_service.get_model_info() if model_loaded else None
-    overall_status = "healthy" if model_loaded else "degraded"
-
+    model_loaded = inference_service.model_loaded
     return HealthResponse(
-        status=overall_status,
+        status="healthy" if model_loaded else "degraded",
         service="estate-inference",
         model_loaded=model_loaded,
-        model_info=model_info,
+        metro_index_loaded=inference_service.metro_index_loaded,
+        model_info=inference_service.get_model_info() if model_loaded else None,
     )
+
+
+@app.get("/livez", tags=["Monitoring"], summary="Liveness probe")
+def liveness() -> dict[str, str]:
+    """Процесс жив и отвечает. Не зависит от MLflow и модели."""
+    return {"status": "alive"}
+
+
+@app.get("/readyz", tags=["Monitoring"], summary="Readiness probe")
+def readiness(response: Response) -> dict[str, str]:
+    """Под готов принимать трафик, только когда модель уже в памяти."""
+    if not inference_service.model_loaded:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "model not loaded"}
+    return {"status": "ready"}
 
 
 @app.get(
@@ -224,10 +234,10 @@ def predict_apartment(request: ApartmentPredictRequest) -> PredictionResult:
             model_version="error",
             model_source="error",
         ).inc()
-        logger.error(f"Inference error: {exc}")
+        logger.exception(f"Inference error: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Inference execution failed: {exc}",
+            detail="Inference execution failed.",
         ) from exc
 
 
@@ -274,10 +284,10 @@ def predict_batch(request: BatchPredictRequest) -> BatchPredictionResult:
             model_version="error",
             model_source="error",
         ).inc()
-        logger.error(f"Batch inference error: {exc}")
+        logger.exception(f"Batch inference error: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch inference execution failed: {exc}",
+            detail="Batch inference execution failed.",
         ) from exc
 
 
@@ -294,13 +304,12 @@ def reload_model() -> ModelInfoResponse:
     """
     try:
         info = inference_service.reload()
-        update_active_model_metric(info)
         MODEL_RELOAD_TOTAL.labels(status="success").inc()
         return info
     except Exception as exc:
         MODEL_RELOAD_TOTAL.labels(status="error").inc()
-        logger.error(f"Model reload failed: {exc}")
+        logger.exception(f"Model reload failed: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reload model: {exc}",
+            detail="Failed to reload model.",
         ) from exc

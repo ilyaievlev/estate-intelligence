@@ -32,6 +32,7 @@ from features.engineering import (
     ALL_FEATURES,
     CATEGORICAL_FEATURES,
     NUMERIC_FEATURES,
+    align_features_to_model,
     clean_dataset,
     prepare_features,
 )
@@ -94,8 +95,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_retraining(
-    iterations: int = 3000,
-    learning_rate: float = 0.03,
+    iterations: int = 2500,
+    learning_rate: float = 0.04,
     depth: int = 7,
     min_improvement_ratio: float = MIN_IMPROVEMENT_RATIO,
     force_promote: bool = False,
@@ -201,7 +202,8 @@ def run_retraining(
 
         if champion_model is not None:
             try:
-                champion_test_pred = np.asarray(champion_model.predict(challenger_res.X_test))
+                champion_X_test = align_features_to_model(challenger_res.X_test, champion_model)
+                champion_test_pred = np.asarray(champion_model.predict(champion_X_test))
                 champion_mae = round(float(mean_absolute_error(y_test_arr, champion_test_pred)), 2)
                 champion_mape = round(
                     float(mean_absolute_percentage_error(y_test_arr, champion_test_pred) * 100.0), 2
@@ -285,12 +287,15 @@ def run_retraining(
         mlflow.set_tag("decision", "ACCEPTED" if is_champion_beaten else "REJECTED")
         mlflow.set_tag("decision_reason", decision_reason)
 
-        # 7. Логируем модель в реестр
-        logger.info(f"Logging candidate model to MLflow Model Registry as '{MLFLOW_MODEL_NAME}'...")
+        # 7. Логируем модель; в реестр попадает только принятый кандидат
+        logger.info(
+            f"Logging candidate model (register in '{MLFLOW_MODEL_NAME}': {is_champion_beaten})..."
+        )
         _, new_version = log_and_register_model(
             model=challenger_res.model,
             model_name=MLFLOW_MODEL_NAME,
             input_example=challenger_res.X_test.head(5),
+            register=is_champion_beaten,
         )
 
         if is_champion_beaten and new_version:

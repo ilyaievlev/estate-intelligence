@@ -35,6 +35,8 @@ spec:
               mountPath: /opt/estate
             - name: pod-template
               mountPath: /opt/airflow/pod_templates
+            - name: logs
+              mountPath: /opt/airflow/logs
           livenessProbe:
             exec:
               command:
@@ -55,3 +57,6 @@ spec:
         - name: pod-template
           configMap:
             name: airflow-pod-template
+        - name: logs
+          persistentVolumeClaim:
+            claimName: airflow-logs

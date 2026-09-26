@@ -95,6 +95,42 @@ provision:
 
 ## Запуск
 
+### Одной командой
+
+```bash
+git clone --recurse-submodules <url-репозитория>
+cd estate-intelligence
+make up
+```
+
+`make up` (это `scripts/up.sh`) делает по порядку:
+
+1. создаёт `.env` из `.env.example`, если его нет, и подтягивает сабмодуль;
+2. запускает Colima с Kubernetes, если она не запущена (ресурсы задаются через `COLIMA_CPU`, `COLIMA_MEMORY`, `COLIMA_DISK`, по умолчанию 6 CPU / 10 ГБ / 60 ГБ);
+3. собирает образы `estate-*`, которых ещё нет;
+4. ставит или обновляет Helm-релиз. Пути к репозиторию и настройки парсера берутся из `.env`, поэтому в `values.yaml` ничего править не надо;
+5. ждёт, пока все поды станут готовы;
+6. открывает port-forward ко всем сервисам. Скрипт работает, пока не нажать Ctrl+C. Ctrl+C закрывает только туннели, кластер продолжает работать, вернуть порты можно через `make forward`.
+
+Первый запуск со сборкой образов занимает 10–15 минут, повторный — около минуты.
+
+Код сервисов монтируется в поды с диска, поэтому после правок в Python пересобирать ничего не нужно, достаточно `make up` или перезапуска пода. `make build` нужен, только если поменялись `requirements.txt` или Dockerfile.
+
+Остальные команды:
+
+| Команда | Что делает |
+|---|---|
+| `make build` | пересобрать все образы и передеплоить |
+| `make forward` | только port-forward (если кластер уже поднят) |
+| `make status` | поды, HPA, сервисы, PVC |
+| `make logs app=inference` | логи сервиса (`inference`, `mlflow`, `airflow-scheduler`, ...) |
+| `make test` | тесты inference API |
+| `make traffic` | генератор нагрузки для дашбордов |
+| `make down` | удалить релиз, данные в PVC остаются |
+| `make destroy` | удалить namespace вместе с данными |
+
+Ниже те же шаги вручную, если нужно понять, что происходит, или запускать не в Colima.
+
 ### 1. Клонирование вместе с сабмодулем
 
 ```bash
@@ -125,32 +161,25 @@ docker build -t estate-collector:latest -f infra/docker/Dockerfile.collector .
 
 С k3d или kind образы придётся загрузить в кластер вручную (`k3d image import ...` / `kind load docker-image ...`).
 
-### 4. Пути к проекту в values.yaml
+### 4. Установка чарта
 
-Airflow монтирует DAG'и и код сервисов в поды через `hostPath`, поэтому чарту нужен абсолютный путь к репозиторию. В `infra/helm/estate-intelligence/values.yaml`:
+Airflow монтирует DAG'и и код сервисов в поды через `hostPath`, поэтому чарту нужен абсолютный путь к репозиторию. Настройки парсера, включая ключ spfa и прокси, в `values.yaml` не хранятся и тоже передаются отдельно. Colima по умолчанию монтирует домашнюю папку в VM, так что пути с хоста работают как есть.
 
-```yaml
+`make up` сам собирает эти значения из `.env` во временный values-файл. Вручную это выглядит так:
+
+```bash
+cat > /tmp/estate-values.yaml <<EOF
 global:
-  dagsHostPath: /Users/<you>/petprojects/estate-intelligence/dags
-  projectHostPath: /Users/<you>/petprojects/estate-intelligence
-```
-
-Colima по умолчанию монтирует домашнюю папку в VM, так что пути с хоста работают как есть.
-
-### 5. Установка чарта
-
-Ключ spfa и прокси не хранятся в `values.yaml`. Положите их в `infra/helm/estate-intelligence/values.local.yaml` (файл в `.gitignore`):
-
-```yaml
+  projectHostPath: $PWD
+  dagsHostPath: $PWD/dags
 collector:
   cookiesApiKey: "..."
   proxyString: "login:password@host:port"
-```
+EOF
 
-```bash
 helm upgrade --install estate ./infra/helm/estate-intelligence \
   --namespace estate --create-namespace \
-  -f ./infra/helm/estate-intelligence/values.local.yaml
+  -f /tmp/estate-values.yaml --wait --timeout 15m
 ```
 
 При первом запуске:
@@ -168,7 +197,7 @@ kubectl get pods,hpa,svc -n estate
 
 Все поды должны быть `Running 1/1`, а `minio-init-bucket` - `Completed`. Холодный старт занимает 2–4 минуты, дольше всех поднимается Airflow.
 
-### 6. Доступ с хоста
+### 5. Доступ с хоста
 
 ```bash
 ./scripts/port_forward.sh
@@ -189,7 +218,7 @@ kubectl get pods,hpa,svc -n estate
 
 Postgres проброшен на 5433, потому что 5432 часто занят локальным Postgres из Homebrew.
 
-### 7. Первая модель
+### 6. Первая модель
 
 Сразу после установки модели в реестре нет, и `/health` вернёт `model_loaded: false`. Варианты:
 
@@ -245,19 +274,21 @@ Postgres проброшен на 5433, потому что 5432 часто за�
 
 ## Модель
 
-Целевая переменная - `monthly_rent`. Перед обучением отбрасываются выбросы: аренда вне диапазона 15 тыс.–1.5 млн ₽, площадь вне 10–400 м², больше 6 комнат, координаты за пределами Москвы и ближнего Подмосковья.
+Целевая переменная - `monthly_rent`. В выборку попадают только объявления, которые парсер видел за последние `TRAIN_MAX_AGE_DAYS` дней (по умолчанию 90), чтобы снятые с публикации квартиры со старыми ценами не тянули модель назад. Перед обучением отбрасываются выбросы: аренда вне диапазона 15 тыс.–1.5 млн ₽, площадь вне 10–400 м², больше 6 комнат, координаты за пределами Москвы и ближнего Подмосковья.
 
 Признаки (`services/ml/features/engineering.py`):
 
 - числовые: комнаты, площадь, этаж и этажность, доля этажа, первый/последний этаж, площадь на комнату, расстояние до метро и до центра (плюс их логарифмы), координаты, наличие и длина описания;
-- категориальные: станция, линия, тип транспорта (метро / МЦК / МЦД), тип продавца, источник. CatBoost обрабатывает их сам, без one-hot.
+- категориальные: ближайшая станция, её линия и тип (метро / МЦК / МЦД). CatBoost обрабатывает их сам, без one-hot.
+
+Станция и расстояние до неё берутся не из текста объявления, а из справочника `metro_stations` по координатам, и в обучении, и в API. Тип продавца и источник в признаки не входят: сейчас это константы. Модели, обученные раньше с этими колонками, продолжают работать: `align_features_to_model` дописывает недостающие признаки тем же значением, которое они видели при обучении.
 
 Переобучение (`services/ml/retrain.py`):
 
 1. Загружает данные, делит их 80/20 с фиксированным `random_state`.
 2. Обучает challenger (по умолчанию 2500 итераций, `depth=7`, `lr=0.04`).
 3. Загружает текущий champion из MLflow и считает метрики обеих моделей на одном и том же тесте.
-4. Если MAE challenger'а лучше хотя бы на `MIN_IMPROVEMENT_RATIO` (0.1%), регистрирует новую версию и переносит на неё алиас `champion`. Причину замены записывает в теги версии.
+4. Если MAE challenger'а лучше хотя бы на `MIN_IMPROVEMENT_RATIO` (0.1%), регистрирует новую версию и переносит на неё алиас `champion`. Причину замены записывает в теги версии. Проигравший challenger остаётся только запуском в эксперименте и в реестр не попадает.
 5. Логирует в MLflow метрики, важность признаков и JSON со сравнением моделей.
 
 Флаг `--force-promote` принудительно делает challenger чемпионом, это удобно для отладки. Остальные параметры - в `python retrain.py --help`.
@@ -270,11 +301,13 @@ FastAPI, Swagger - на `/docs`.
 
 | Метод | Путь | Что делает |
 |---|---|---|
-| GET | `/health` | статус сервиса и загруженной модели |
+| GET | `/health` | статус сервиса, загружена ли модель и справочник станций |
+| GET | `/livez` | liveness-проба: процесс отвечает |
+| GET | `/readyz` | readiness-проба: 503, пока модель не загружена |
 | GET | `/model` | версия, run_id, метрики и теги текущей модели |
 | POST | `/predict` | предсказание для одной квартиры |
 | POST | `/predict/batch` | предсказание для списка квартир |
-| POST | `/model/reload` | перечитать champion из MLflow без рестарта |
+| POST | `/model/reload` | перечитать champion из MLflow без рестарта (только в том поде, куда попал запрос) |
 | GET | `/metrics` | метрики для Prometheus |
 
 Пример:
@@ -284,17 +317,17 @@ curl -s -X POST http://localhost:8000/predict \
   -H 'Content-Type: application/json' \
   -d '{
     "rooms": 2, "area": 55, "floor": 7, "floors_total": 14,
-    "metro": "Белорусская", "metro_distance_m": 450,
-    "metro_line": "Замоскворецкая", "transport_type": "walk",
     "latitude": 55.777, "longitude": 37.583
   }'
 ```
 
-Расстояние до центра считается на стороне сервиса по координатам, передавать его не нужно. Если MLflow недоступен при старте, сервис пробует загрузить локальную копию модели из `services/ml/artifacts/models/`.
+По координатам сервис сам считает расстояние до центра и находит ближайшую станцию метро, МЦК или МЦД из таблицы `metro_stations` (так же, как это делает VIEW `apartment_nearest_metro` для обучающей выборки). Поля `metro`, `metro_line`, `transport_type` и `metro_distance_m` нужны только для запросов без координат; `transport_type` принимает `metro`, `mcc` или `mcd`.
+
+Каждая реплика раз в минуту (`inference.modelPollIntervalSec` в `values.yaml`) сверяет версию алиаса `@champion` и сама подтягивает новую модель, так что после переобучения обновляются все поды, а не только тот, до которого дошёл `/model/reload`. Если MLflow недоступен при старте, сервис пробует загрузить локальную копию модели из `services/ml/artifacts/models/`.
 
 ## Мониторинг
 
-Prometheus собирает метрики с `inference:8000/metrics` и `clickhouse:9363/metrics`. Grafana поднимается с уже подключёнными источниками данных (Prometheus и ClickHouse) и двумя дашбордами в папке *Estate Intelligence*:
+Prometheus находит поды inference через Kubernetes API (`kubernetes_sd_configs`) и скрейпит каждую реплику отдельно, плюс `clickhouse:9363/metrics`. Grafana поднимается с уже подключёнными источниками данных (Prometheus и ClickHouse) и двумя дашбордами в папке *Estate Intelligence*:
 
 - **ML Инференс & Мониторинг Модели** - активная версия модели и число перезагрузок, RPS по HTTP-статусам, латентность API и чистое время инференса по перцентилям, распределение предсказанных цен, доля запросов по комнатности, средний размер батча;
 - **Рыночная Аналитика (ClickHouse)** - количество снапшотов и уникальных объявлений, медианная и средняя аренда, перцентили p25/p50/p75 во времени, интенсивность сбора по часам, сегменты по цене, QPS и память ClickHouse.
@@ -329,8 +362,7 @@ kubectl exec -it -n estate postgres-0 -- psql -U estate -d estate
 kubectl exec -it -n estate clickhouse-0 -- clickhouse-client -u estate --password estate -d estate
 
 # применить изменения чарта
-helm upgrade estate ./infra/helm/estate-intelligence -n estate \
-  -f ./infra/helm/estate-intelligence/values.local.yaml
+make up
 
 # пересобрать образ и перезапустить сервис
 docker build -t estate-inference:latest -f infra/docker/Dockerfile.inference .
@@ -358,7 +390,7 @@ python services/inference/test_api.py
 - **`ErrImageNeverPull` / `ImagePullBackOff` на `estate-*`.** Образ не собран или собран в другом Docker-контексте. Проверьте `docker images | grep estate` и `docker context ls`.
 - **Airflow-scheduler перезапускается.** Обычно это liveness-проба во время тяжёлых запросов к метабазе. В чарте таймауты уже увеличены, но на слабой машине их можно поднять ещё (`deployment-scheduler.yaml`).
 - **Под задачи Airflow падает сразу после старта.** Посмотрите `kubectl logs <pod> -n estate` и проверьте, что `global.projectHostPath` в `values.yaml` указывает на реальный путь.
-- **`/health` показывает `model_loaded: false`.** В реестре нет версии с алиасом `champion`. См. раздел [Первая модель](#7-первая-модель).
+- **`/health` показывает `model_loaded: false`.** В реестре нет версии с алиасом `champion`. См. раздел [Первая модель](#6-первая-модель).
 - **Парсер ловит блокировки.** См. раздел про парсер ниже.
 
 ## Парсер Avito

@@ -12,7 +12,7 @@ ML_DIR = Path(__file__).resolve().parent.parent
 if str(ML_DIR) not in sys.path:
     sys.path.insert(0, str(ML_DIR))
 
-from config import DATABASE_URL, MOSCOW_CENTER_LAT, MOSCOW_CENTER_LON
+from config import DATABASE_URL, MOSCOW_CENTER_LAT, MOSCOW_CENTER_LON, TRAIN_MAX_AGE_DAYS
 
 _SQL_QUERY = """
 SELECT
@@ -47,6 +47,7 @@ LEFT JOIN apartment_nearest_metro nm
 WHERE a.monthly_rent IS NOT NULL
   AND a.monthly_rent > 0
   AND a.location IS NOT NULL
+  AND (%s <= 0 OR a.last_seen_at >= NOW() - make_interval(days => %s))
 ORDER BY a.published_at DESC NULLS LAST, a.first_seen_at DESC
 """
 
@@ -54,6 +55,7 @@ ORDER BY a.published_at DESC NULLS LAST, a.first_seen_at DESC
 def load_apartments_from_db(
     database_url: str | None = None,
     limit: int | None = None,
+    max_age_days: int | None = None,
 ) -> pd.DataFrame:
     """
     Загружает актуальный датасет объявлений из PostgreSQL.
@@ -63,10 +65,14 @@ def load_apartments_from_db(
     - distance_to_center_m: точное геодезическое расстояние до центра Москвы (Красная пл.) в метрах.
     """
     url = database_url or DATABASE_URL
-    logger.info("Connecting to PostgreSQL to load apartments dataset...")
+    max_age = TRAIN_MAX_AGE_DAYS if max_age_days is None else max_age_days
+    logger.info(
+        "Connecting to PostgreSQL to load apartments dataset "
+        f"(last_seen window: {f'{max_age} days' if max_age > 0 else 'unlimited'})..."
+    )
 
     query = _SQL_QUERY.strip().rstrip(";")
-    params: list[Any] = [MOSCOW_CENTER_LON, MOSCOW_CENTER_LAT]
+    params: list[Any] = [MOSCOW_CENTER_LON, MOSCOW_CENTER_LAT, max_age, max_age]
     if limit is not None and limit > 0:
         query += " LIMIT %s"
         params.append(limit)

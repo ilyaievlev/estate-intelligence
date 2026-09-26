@@ -31,11 +31,37 @@ CATEGORICAL_FEATURES = [
     "metro",
     "metro_line",
     "transport_type",
-    "seller_type",
-    "source",
 ]
 
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
+# Признаки, которые были у старых моделей и убраны из набора (в данных они
+# константны: парсер пишет seller_type=NULL, источник только avito).
+# Значения совпадают с тем, что эти модели видели при обучении.
+LEGACY_FEATURE_DEFAULTS: dict[str, object] = {
+    "seller_type": "unknown",
+    "source": "avito",
+}
+
+
+def align_features_to_model(X: pd.DataFrame, model: object) -> pd.DataFrame:
+    """
+    Приводит матрицу признаков к набору и порядку колонок конкретной модели.
+    Нужно, чтобы champion, обученный на другом наборе признаков, продолжал
+    работать в inference и честно оценивался при переобучении.
+    """
+    expected = list(getattr(model, "feature_names_", None) or [])
+    if not expected or expected == list(X.columns):
+        return X
+
+    aligned = X.copy()
+    missing = [name for name in expected if name not in aligned.columns]
+    unknown = [name for name in missing if name not in LEGACY_FEATURE_DEFAULTS]
+    if unknown:
+        raise ValueError(f"Model expects features that cannot be derived: {unknown}")
+    for name in missing:
+        aligned[name] = LEGACY_FEATURE_DEFAULTS[name]
+    return pd.DataFrame(aligned[expected])
 
 
 def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
@@ -170,12 +196,6 @@ def prepare_features(
     trans_type = pd.Series(
         data["transport_type"] if "transport_type" in data.columns else "metro", index=data.index
     ).fillna("metro").astype(str)
-    seller = pd.Series(
-        data["seller_type"] if "seller_type" in data.columns else "unknown", index=data.index
-    ).fillna("unknown").astype(str)
-    source = pd.Series(
-        data["source"] if "source" in data.columns else "unknown", index=data.index
-    ).fillna("unknown").astype(str)
 
     X_dict = {
         "rooms": rooms,
@@ -197,8 +217,6 @@ def prepare_features(
         "metro": metro,
         "metro_line": metro_line,
         "transport_type": trans_type,
-        "seller_type": seller,
-        "source": source,
     }
 
     X = pd.DataFrame(X_dict, index=data.index)

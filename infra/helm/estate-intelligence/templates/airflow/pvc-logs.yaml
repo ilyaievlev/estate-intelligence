@@ -1,0 +1,16 @@
+# Общие логи задач: поды KubernetesExecutor удаляются после выполнения,
+# и без общего тома webserver не может показать их лог.
+# RWO достаточно — кластер из одной ноды, все поды монтируют том на ней.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-logs
+  labels:
+    app: airflow
+    {{- include "estate-intelligence.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.airflow.logs.persistence.size }}

@@ -23,7 +23,7 @@ from config import (
     MOSCOW_CENTER_LAT,
     MOSCOW_CENTER_LON,
 )
-from features.engineering import prepare_features
+from features.engineering import align_features_to_model, prepare_features
 from models.registry import load_production_model
 
 # Кэшированный экземпляр модели в оперативной памяти
@@ -101,7 +101,7 @@ def predict_rent(
 
     # Загрузка и инференс обученной модели CatBoost
     current_model = model or get_model()
-    predictions = current_model.predict(X)
+    predictions = current_model.predict(align_features_to_model(X, current_model))
 
     results: list[dict[str, Any]] = []
     for idx, pred_val in enumerate(predictions):
@@ -141,15 +141,12 @@ def parse_cli_args() -> argparse.Namespace:
         "--transport-type",
         type=str,
         default="metro",
-        choices=["metro", "walk", "transport"],
-        help="Transport type to metro",
+        choices=["metro", "mcc", "mcd"],
+        help="Type of the nearest station",
     )
     parser.add_argument("--distance-to-center", type=float, default=None, help="Distance to Kremlin in meters")
     parser.add_argument("--latitude", type=float, default=None, help="Latitude")
     parser.add_argument("--longitude", type=float, default=None, help="Longitude")
-    parser.add_argument("--seller-type", type=str, default="realtor", help="Seller type (owner, realtor, etc.)")
-    parser.add_argument("--source", type=str, default="avito", help="Listing source (avito, cian)")
-
     # Пакетный режим
     parser.add_argument("--json", type=str, default=None, help="JSON string with apartment data or list of apartments")
     parser.add_argument("--json-file", type=str, default=None, help="Path to JSON file with input apartment(s)")
@@ -184,8 +181,6 @@ def main() -> None:
             "metro_distance_m": args.metro_distance,
             "metro_line": args.metro_line,
             "transport_type": args.transport_type,
-            "seller_type": args.seller_type,
-            "source": args.source,
         }
         if args.distance_to_center is not None:
             apartment["distance_to_center_m"] = args.distance_to_center

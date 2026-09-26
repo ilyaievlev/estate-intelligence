@@ -30,8 +30,13 @@ MODELS_DIR = ARTIFACTS_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Координаты центра Москвы (Красная площадь / Кремль) для гео-признака
-MOSCOW_CENTER_LAT = 55.753930
-MOSCOW_CENTER_LON = 37.620795
+# (должны совпадать в обучении и inference, поэтому оба читают один .env)
+MOSCOW_CENTER_LAT = float(os.getenv("MOSCOW_CENTER_LAT", "55.753930"))
+MOSCOW_CENTER_LON = float(os.getenv("MOSCOW_CENTER_LON", "37.620795"))
+
+# В обучение идут только объявления, которые парсер видел за последние N дней
+# (снятые объявления с устаревшими ценами отсекаются). 0 — без ограничения.
+TRAIN_MAX_AGE_DAYS = int(os.getenv("TRAIN_MAX_AGE_DAYS", "90"))
 
 # Параметры разбиения и валидации
 TEST_SIZE = 0.2

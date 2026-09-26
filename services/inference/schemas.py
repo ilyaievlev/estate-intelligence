@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -36,26 +36,29 @@ class ApartmentPredictRequest(BaseModel):
         description="Общая этажность дома",
         examples=[12],
     )
-    metro: str = Field(
-        default="Белорусская",
-        description="Название ближайшей станции метро",
+    metro: str | None = Field(
+        default=None,
+        description=(
+            "Ближайшая станция. Если переданы latitude/longitude, станция, линия, тип "
+            "и расстояние определяются по справочнику автоматически и это поле игнорируется."
+        ),
         examples=["Белорусская"],
     )
-    metro_distance_m: float = Field(
-        default=500.0,
+    metro_distance_m: float | None = Field(
+        default=None,
         ge=0.0,
-        description="Расстояние до ближайшей станции метро в метрах",
+        description="Расстояние до ближайшей станции в метрах (без координат)",
         examples=[650.0],
     )
-    metro_line: str = Field(
-        default="Замоскворецкая",
-        description="Линия метрополитена",
+    metro_line: str | None = Field(
+        default=None,
+        description="Линия ближайшей станции (без координат)",
         examples=["Замоскворецкая"],
     )
-    transport_type: str = Field(
-        default="walk",
-        description="Тип передвижения до метро: walk (пешком), transport (на транспорте), metro",
-        examples=["walk"],
+    transport_type: Literal["metro", "mcc", "mcd"] | None = Field(
+        default=None,
+        description="Тип ближайшей станции: metro, mcc (МЦК) или mcd (МЦД)",
+        examples=["metro"],
     )
     latitude: float | None = Field(
         default=None,
@@ -71,16 +74,6 @@ class ApartmentPredictRequest(BaseModel):
         default=None,
         description="Расстояние до центра Москвы (Кремля) в метрах. Если переданы latitude и longitude, рассчитывается автоматически.",
         examples=[3488.6],
-    )
-    seller_type: str = Field(
-        default="realtor",
-        description="Тип арендодателя / автора: owner, realtor, agency, developer",
-        examples=["realtor"],
-    )
-    source: str = Field(
-        default="avito",
-        description="Источник объявления: avito, cian",
-        examples=["avito"],
     )
     description: str | None = Field(
         default=None,
@@ -119,6 +112,8 @@ class PredictionResult(BaseModel):
     rooms: int
     area: float
     metro: str
+    metro_line: str
+    transport_type: str
     metro_distance_m: float
     distance_to_center_m: float
     model_name: str
@@ -163,4 +158,5 @@ class HealthResponse(BaseModel):
     status: str = Field(examples=["healthy", "degraded"])
     service: str = "estate-inference"
     model_loaded: bool
+    metro_index_loaded: bool = False
     model_info: ModelInfoResponse | None = None

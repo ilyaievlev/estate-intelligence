@@ -40,6 +40,13 @@ def test_health_endpoint():
     assert "model_loaded" in data
 
 
+def test_probes():
+    """/livez всегда 200, /readyz — 200 или 503 в зависимости от наличия модели."""
+    assert client.get("/livez").status_code == 200
+    ready = client.get("/readyz")
+    assert ready.status_code in (200, 503)
+
+
 def test_model_endpoint():
     """Проверка получения метаданных активной модели-чемпиона из /model."""
     response = client.get("/model")
@@ -60,11 +67,9 @@ def test_predict_single_apartment():
         "metro": "Белорусская",
         "metro_distance_m": 450.0,
         "metro_line": "Замоскворецкая",
-        "transport_type": "walk",
+        "transport_type": "metro",
         "latitude": 55.777,
         "longitude": 37.583,
-        "seller_type": "realtor",
-        "source": "avito",
     }
     response = client.post("/predict", json=payload)
     assert response.status_code == 200
@@ -93,7 +98,7 @@ def test_predict_batch():
                 "metro": "Сокол",
                 "metro_distance_m": 300.0,
                 "metro_line": "Замоскворецкая",
-                "transport_type": "walk",
+                "transport_type": "metro",
                 "latitude": 55.805,
                 "longitude": 37.515,
             },
@@ -105,7 +110,7 @@ def test_predict_batch():
                 "metro": "Арбатская",
                 "metro_distance_m": 200.0,
                 "metro_line": "Арбатско-Покровская",
-                "transport_type": "walk",
+                "transport_type": "metro",
                 "latitude": 55.752,
                 "longitude": 37.601,
             },
@@ -132,6 +137,52 @@ def test_predict_validation_error():
     }
     response = client.post("/predict", json=payload)
     assert response.status_code == 422
+
+
+def test_predict_rejects_unknown_transport_type():
+    """transport_type ограничен значениями из справочника станций (metro/mcc/mcd)."""
+    payload = {"rooms": 1, "area": 35.0, "floor": 3, "floors_total": 9, "transport_type": "walk"}
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 422
+
+
+def test_predict_resolves_metro_from_coordinates():
+    """При наличии координат станция определяется по справочнику, а не берётся из запроса."""
+    from services.inference.service import inference_service
+
+    payload = {
+        "rooms": 1,
+        "area": 38.0,
+        "floor": 4,
+        "floors_total": 12,
+        "metro": "Выхино",
+        "metro_distance_m": 5000.0,
+        "latitude": 55.805,
+        "longitude": 37.515,
+    }
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    if inference_service.metro_index_loaded:
+        assert data["metro"] != "Выхино"
+        assert data["metro_distance_m"] < 5000.0
+        assert data["transport_type"] in ("metro", "mcc", "mcd")
+
+
+def test_align_features_for_legacy_model():
+    """Модель со старым набором признаков получает недостающие колонки и нужный порядок."""
+    import pandas as pd
+
+    from services.ml.features.engineering import ALL_FEATURES, align_features_to_model
+
+    class LegacyModel:
+        feature_names_ = ["source", *ALL_FEATURES, "seller_type"]
+
+    X = pd.DataFrame([{name: 1 for name in ALL_FEATURES}])
+    aligned = align_features_to_model(X, LegacyModel())
+    assert list(aligned.columns) == LegacyModel.feature_names_
+    assert aligned.loc[0, "seller_type"] == "unknown"
+    assert aligned.loc[0, "source"] == "avito"
 
 
 def test_model_reload():
@@ -164,6 +215,14 @@ if __name__ == "__main__":
     test_predict_batch()
     print("Running test_predict_validation_error...")
     test_predict_validation_error()
+    print("Running test_probes...")
+    test_probes()
+    print("Running test_predict_rejects_unknown_transport_type...")
+    test_predict_rejects_unknown_transport_type()
+    print("Running test_predict_resolves_metro_from_coordinates...")
+    test_predict_resolves_metro_from_coordinates()
+    print("Running test_align_features_for_legacy_model...")
+    test_align_features_for_legacy_model()
     print("Running test_model_reload...")
     test_model_reload()
     print("Running test_metrics_endpoint...")
